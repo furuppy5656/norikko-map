@@ -114,7 +114,9 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script>
 const API='https://ny-a.github.io/ekidata/api';
-const JP_TOTAL=9987;   // 全国の現役総区間数（CLOSED/EXTRA/EXTEND反映・2026-06集計。路線を大きく足したら再計算）
+const JP_TOTAL=9987;
+// 新幹線など、直線だと地形を跨いで不自然な区間の「実線路寄り」中継点。キー=sid(cd|駅A|駅B)。無い区間は従来通り直線。
+const SK_GEOM={"910003|広島|新岩国":[[34.3977,132.4753],[34.38,132.36],[34.355,132.28],[34.29,132.225],[34.1646,132.1846]]};   // 全国の現役総区間数（CLOSED/EXTRA/EXTEND反映・2026-06集計。路線を大きく足したら再計算）
 const PREFS={1:'北海道',2:'青森県',3:'岩手県',4:'宮城県',5:'秋田県',6:'山形県',7:'福島県',8:'茨城県',9:'栃木県',10:'群馬県',11:'埼玉県',12:'千葉県',13:'東京都',14:'神奈川県',15:'新潟県',16:'富山県',17:'石川県',18:'福井県',19:'山梨県',20:'長野県',21:'岐阜県',22:'静岡県',23:'愛知県',24:'三重県',25:'滋賀県',26:'京都府',27:'大阪府',28:'兵庫県',29:'奈良県',30:'和歌山県',31:'鳥取県',32:'島根県',33:'岡山県',34:'広島県',35:'山口県',36:'徳島県',37:'香川県',38:'愛媛県',39:'高知県',40:'福岡県',41:'佐賀県',42:'長崎県',43:'熊本県',44:'大分県',45:'宮崎県',46:'鹿児島県',47:'沖縄県'};
 
 // ===== 更新パッチ（手動補正） =====
@@ -314,15 +316,17 @@ function drawMap(){
   for(const l of lines){
     const lc=lineCache[l.line_cd]; if(!lc)continue;
     for(let i=0;i<lc.stations.length-1;i++){
-      if(!ridden.has(sid(l.line_cd,lc.stations,i))) continue;   // ★乗車済み区間だけ描く
+      const k=sid(l.line_cd,lc.stations,i);
+      if(!ridden.has(k)) continue;   // ★乗車済み区間だけ描く
       const a=lc.stations[i],b=lc.stations[i+1];
       if(!a.lat||!b.lat)continue;
-      const pl=L.polyline([[a.lat,a.lon],[b.lat,b.lon]],{
+      const path=SK_GEOM[k]||[[a.lat,a.lon],[b.lat,b.lon]];   // 中継点があれば実線路寄りに
+      const pl=L.polyline(path,{
         color:'#2e7d32', weight:6, opacity:1,
         dashArray: lc.jr?null:'10 6', lineCap:'butt'});   // JR=実線 / 私鉄=破線
       pl.bindTooltip(`${lc.name}：${a.name}—${b.name}`,{sticky:true});
-      pl.on('click',()=>{ridden.delete(sid(l.line_cd,lc.stations,i)); commit();});  // クリックで解除
-      pl.addTo(mgroup); pts.push([a.lat,a.lon],[b.lat,b.lon]);
+      pl.on('click',()=>{ridden.delete(k); commit();});  // クリックで解除
+      pl.addTo(mgroup); path.forEach(p=>pts.push(p));
     }
   }
   if(pts.length)map.fitBounds(pts,{padding:[30,30]});
@@ -337,11 +341,13 @@ async function drawNationwide(){
   for(const cd of cds){
     const lc=lineCache[cd]; if(!lc)continue;
     for(let i=0;i<lc.stations.length-1;i++){
-      if(!ridden.has(sid(cd,lc.stations,i)))continue;
+      const k=sid(cd,lc.stations,i);
+      if(!ridden.has(k))continue;
       const a=lc.stations[i],b=lc.stations[i+1]; if(!a.lat||!b.lat)continue;
-      const pl=L.polyline([[a.lat,a.lon],[b.lat,b.lon]],{color:'#2e7d32',weight:5,opacity:1,dashArray:lc.jr?null:'10 6',lineCap:'butt'});
+      const path=SK_GEOM[k]||[[a.lat,a.lon],[b.lat,b.lon]];
+      const pl=L.polyline(path,{color:'#2e7d32',weight:5,opacity:1,dashArray:lc.jr?null:'10 6',lineCap:'butt'});
       pl.bindTooltip(`${lc.name}：${a.name}—${b.name}`,{sticky:true});
-      pl.addTo(mgroup); pts.push([a.lat,a.lon],[b.lat,b.lon]);
+      pl.addTo(mgroup); path.forEach(p=>pts.push(p));
     }
   }
   $('mapAll').textContent = mapMode==='all'?'← 県別に戻る':'🗾 全国の乗車済みを表示';
