@@ -126,6 +126,10 @@ const JP_TOTAL=9987;
 // 新幹線など、直線だと地形を跨いで不自然な区間の「実線路寄り」中継点。キー=sid(cd|駅A|駅B)。無い区間は従来通り直線。
 const SK_GEOM={"910003|広島|新岩国":[[34.3977,132.4753],[34.38,132.36],[34.355,132.28],[34.29,132.225],[34.1646,132.1846]]};   // 全国の現役総区間数（CLOSED/EXTRA/EXTEND反映・2026-06集計。路線を大きく足したら再計算）
 const PREFS={1:'北海道',2:'青森県',3:'岩手県',4:'宮城県',5:'秋田県',6:'山形県',7:'福島県',8:'茨城県',9:'栃木県',10:'群馬県',11:'埼玉県',12:'千葉県',13:'東京都',14:'神奈川県',15:'新潟県',16:'富山県',17:'石川県',18:'福井県',19:'山梨県',20:'長野県',21:'岐阜県',22:'静岡県',23:'愛知県',24:'三重県',25:'滋賀県',26:'京都府',27:'大阪府',28:'兵庫県',29:'奈良県',30:'和歌山県',31:'鳥取県',32:'島根県',33:'岡山県',34:'広島県',35:'山口県',36:'徳島県',37:'香川県',38:'愛媛県',39:'高知県',40:'福岡県',41:'佐賀県',42:'長崎県',43:'熊本県',44:'大分県',45:'宮崎県',46:'鹿児島県',47:'沖縄県'};
+// 地域まとめ（複数県を1グラフにして県境の重複を解消し、地域全体の周遊ルートを出す）
+const REGIONS={'北海道':[1],'東北':[2,3,4,5,6,7],'関東':[8,9,10,11,12,13,14],'甲信越':[15,19,20],'北陸':[16,17,18],'東海':[21,22,23,24],'近畿':[25,26,27,28,29,30],'中国':[31,32,33,34,35],'四国':[36,37,38,39],'九州':[40,41,42,43,44,45,46,47]};
+const isRegion=p=>typeof p==='string'&&p.startsWith('R:');
+function prefTitle(p){ if(isRegion(p))return '🗾 '+p.slice(2)+'地方'; return p==0?'🚄 新幹線':PREFS[p]; }
 
 // ===== 更新パッチ（手動補正） =====
 // 廃止区間：進捗の分母から除外し「廃止」表示。履歴として塗ることは可能。
@@ -262,8 +266,18 @@ async function selectPref(p){
   const box=$('lineList'); box.innerHTML='<div class="hint">路線を読み込み中…</div>';
   try{
     if(!prefLines[p]){
-      let base = p>0 ? (((await getJSON(`${API}/p/${p}.json`)).line)||[]) : [];   // 0=新幹線カテゴリ（ekidata無し）
-      EXTRA_LINES.filter(e=>e.pref===p).forEach(e=>{ if(!base.some(x=>x.line_cd===e.line_cd)) base.push({line_cd:e.line_cd,line_name:e.line_name}); });
+      let base;
+      if(isRegion(p)){                                   // 地域＝複数県の路線を line_cd で重複排除して1本化
+        const prefs=REGIONS[p.slice(2)], seen=new Set(); base=[];
+        for(const pr of prefs){
+          const ls=(((await getJSON(`${API}/p/${pr}.json`)).line)||[]);
+          ls.forEach(l=>{ if(!seen.has(l.line_cd)){seen.add(l.line_cd);base.push(l);} });
+        }
+        EXTRA_LINES.filter(e=>prefs.includes(e.pref)).forEach(e=>{ if(!seen.has(e.line_cd)){seen.add(e.line_cd);base.push({line_cd:e.line_cd,line_name:e.line_name});} });
+      } else {
+        base = p>0 ? (((await getJSON(`${API}/p/${p}.json`)).line)||[]) : [];   // 0=新幹線カテゴリ（ekidata無し）
+        EXTRA_LINES.filter(e=>e.pref===p).forEach(e=>{ if(!base.some(x=>x.line_cd===e.line_cd)) base.push({line_cd:e.line_cd,line_name:e.line_name}); });
+      }
       prefLines[p]=base;
     }
   }catch(e){
@@ -277,7 +291,7 @@ async function selectPref(p){
 
 function renderLineList(){
   const pr=prefProgress(curPref);
-  $('prefHead').innerHTML=`<b>${curPref==0?'🚄 新幹線':PREFS[curPref]}</b>：${pr.pct}% <span style="color:#888">(${pr.d}/${pr.t}区間)</span>`;
+  $('prefHead').innerHTML=`<b>${prefTitle(curPref)}</b>：${pr.pct}% <span style="color:#888">(${pr.d}/${pr.t}区間)</span>`;
   const box=$('lineList'); box.innerHTML='';
   for(const l of prefLines[curPref]){
     const cd=l.line_cd, loaded=!!lineCache[cd], t=total(cd), d=done(cd), pct=t?Math.round(d/t*100):0;
@@ -485,7 +499,7 @@ async function renderRoute(){
   });
   routeData={coord,ride,move};
   const hours=((totRide+totMove)/45).toFixed(1);
-  box.innerHTML=`<div class="diagTitle">🧭 ${curPref==0?'新幹線':PREFS[curPref]} 効率乗りつぶしルート（未乗のみ）</div>`+
+  box.innerHTML=`<div class="diagTitle">🧭 ${prefTitle(curPref)} 効率乗りつぶしルート（未乗のみ）</div>`+
     `<div class="diagSub">未乗 <b>${edges.length}</b>区間／${comps.length}まとまり　`+
     `<b style="color:#e53935">乗車 約${totRide.toFixed(0)}km</b> ＋ 移動/折返し 約${totMove.toFixed(0)}km　所要目安 <b>約${hours}時間</b>`+
     `<span style="color:#aaa">（表定45km/h・乗換待ち除く）</span><br>`+
@@ -511,8 +525,11 @@ function drawRoute(){
 }
 
 /* ---- UI ---- */
-const sel=$('pref'); sel.innerHTML='<option value="">▼ 選択</option><option value="0">🚄 新幹線</option>'+Object.entries(PREFS).map(([k,v])=>`<option value="${k}">${v}</option>`).join('');
-sel.onchange=()=>{if(sel.value){curLine=null;$('diagram').innerHTML='<div class="hint">路線をクリックしてください。</div>';selectPref(+sel.value)}};
+const sel=$('pref');
+sel.innerHTML='<option value="">▼ 選択</option><option value="0">🚄 新幹線</option>'+
+  '<optgroup label="地域まとめ（複数県を1ルート）">'+Object.keys(REGIONS).map(r=>`<option value="R:${r}">🗾 ${r}地方</option>`).join('')+'</optgroup>'+
+  '<optgroup label="都道府県">'+Object.entries(PREFS).map(([k,v])=>`<option value="${k}">${v}</option>`).join('')+'</optgroup>';
+sel.onchange=()=>{if(sel.value){curLine=null;$('diagram').innerHTML='<div class="hint">路線をクリックしてください。</div>';selectPref(isRegion(sel.value)?sel.value:+sel.value)}};
 $('refresh').onclick=()=>{ if(curPref==null){alert('先に選択してください');return} delete prefLines[curPref]; $('diagram').innerHTML='<div class="hint">路線をクリックしてください。</div>'; curLine=null; selectPref(curPref); };
 $('routeBtn').onclick=renderRoute;
 
