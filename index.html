@@ -113,7 +113,8 @@
     <div id="legRoute" style="display:none">
       <div style="font-weight:500;margin-bottom:2px">効率ルート（未乗）</div>
       <div><i style="border-color:#e53935"></i>未乗区間（乗る）</div>
-      <div><i style="border-color:#9e9e9e;border-top-style:dashed"></i>移動／折返し</div>
+      <div><i style="border-color:#9e9e9e;border-top-style:dashed"></i>在来で移動／折返し</div>
+      <div><i style="border-color:#1565c0;border-top-style:dashed"></i>🚄新幹線で移動</div>
     </div>
   </div>
   <div id="map"></div>
@@ -412,7 +413,10 @@ async function drawNationwide(){
 }
 
 /* ---- 効率ルート算出（未乗区間の中国人郵便配達問題＝重複最小の周遊順） ---- */
-let routeData=null;   // {coord, ride:[{u,v,line}], move:[{u,v}]}
+let routeData=null;   // {coord, ride:[{u,v,line}], move:[{u,v,coords,min,sk}]}
+const SPEED_SK=200, SPEED_LOCAL=45;                     // 表定速度の目安(km/h)：新幹線/在来
+const SK_CDS=new Set(EXTRA_LINES.filter(e=>e.pref===0).map(e=>e.line_cd));  // 新幹線line_cd
+const fmtH=m=>{const h=Math.floor(m/60),mm=Math.round(m%60);return h?`${h}時間${mm?mm+'分':''}`:`${mm}分`;};
 function haversine(a,b){const R=6371,toR=x=>x*Math.PI/180;
   const dla=toR(b.lat-a.lat),dlo=toR(b.lon-a.lon);
   const s=Math.sin(dla/2)**2+Math.cos(toR(a.lat))*Math.cos(toR(b.lat))*Math.sin(dlo/2)**2;
@@ -432,6 +436,32 @@ function buildUnridden(lines){
     }
   }
   return {edges,coord};
+}
+// 移動用の全路線網グラフ（地域の全線＋全新幹線。重み=所要時間[分]）。既乗線も新幹線もデッドヘッド経路に使える。
+async function buildTravelGraph(lines){
+  const all=[...lines];
+  for(const cd of SK_CDS){ if(!lineCache[cd]) await loadLine(cd).catch(()=>null); const c=lineCache[cd]; if(c){c._cd=cd; if(!all.includes(c))all.push(c);} }
+  const adj=new Map(), coord={};
+  const add=(a,b,w,sk)=>{ if(!adj.has(a))adj.set(a,[]); adj.get(a).push({to:b,w,sk}); };
+  for(const lc of all){
+    const sk=SK_CDS.has(lc._cd);
+    for(let i=0;i<lc.stations.length-1;i++){
+      const a=lc.stations[i],b=lc.stations[i+1]; if(!a.lat||!b.lat||a.name===b.name)continue;
+      coord[a.name]=coord[a.name]||{lat:a.lat,lon:a.lon}; coord[b.name]=coord[b.name]||{lat:b.lat,lon:b.lon};
+      const w=haversine(a,b)/(sk?SPEED_SK:SPEED_LOCAL)*60;
+      add(a.name,b.name,w,sk); add(b.name,a.name,w,sk);
+    }
+  }
+  return {adj,coord};
+}
+function dijkstra(adj,src){              // 二分ヒープDijkstra。dist[分]とprevを返す
+  const dist=new Map([[src,0]]), prev=new Map(), h=[[0,src]];
+  const up=i=>{while(i>0){const p=(i-1)>>1;if(h[p][0]<=h[i][0])break;[h[p],h[i]]=[h[i],h[p]];i=p;}};
+  const down=i=>{const n=h.length;for(;;){let l=2*i+1,r=2*i+2,m=i;if(l<n&&h[l][0]<h[m][0])m=l;if(r<n&&h[r][0]<h[m][0])m=r;if(m===i)break;[h[m],h[i]]=[h[i],h[m]];i=m;}};
+  while(h.length){const top=h[0],last=h.pop();if(h.length){h[0]=last;down(0);} const d=top[0],u=top[1];
+    if(d>(dist.get(u)??Infinity))continue;
+    for(const e of (adj.get(u)||[])){const nd=d+e.w;if(nd<(dist.get(e.to)??Infinity)){dist.set(e.to,nd);prev.set(e.to,{from:u,sk:e.sk});h.push([nd,e.to]);up(h.length-1);}}}
+  return {dist,prev};
 }
 function components(edges){
   const par={},find=x=>{while(par[x]!==x){par[x]=par[par[x]];x=par[x];}return x;};
@@ -459,10 +489,21 @@ function eulerPath(aug){                 // Hierholzer：駅名列を返す
     if(!adv)walk.push(stack.pop());}
   return walk.reverse();
 }
-function planComponent(compEdges,coord){
+function planComponent(compEdges,coord,tg){
   const deg={};compEdges.forEach(e=>{deg[e.u]=(deg[e.u]||0)+1;deg[e.v]=(deg[e.v]||0)+1;});
   const odd=Object.keys(deg).filter(n=>deg[n]%2===1);
-  const conns=matchOdd(odd,coord).map(p=>({u:p.u,v:p.v,line:'__move__',km:p.km,connector:true}));
+  const dj={}; odd.forEach(o=>{ dj[o]=dijkstra(tg.adj,o); });   // 奇数駅から実路線網で最短時間
+  const rem=[...odd],pairs=[];                                   // 貪欲最近傍マッチング（時間ベース）
+  while(rem.length>1){const a=rem.shift();let bi=0,bd=Infinity;
+    for(let i=0;i<rem.length;i++){const d=dj[a].dist.get(rem[i]);const dd=(d==null?Infinity:d);if(dd<bd){bd=dd;bi=i;}}
+    pairs.push({u:a,v:rem[bi],min:bd});rem.splice(bi,1);}
+  const conns=pairs.map(p=>{                                     // 実経路を復元（経路座標・時間・新幹線利用）
+    const path=[p.v];let cur=p.v,sk=false;
+    while(cur!==p.u){const pr=dj[p.u].prev.get(cur);if(!pr)break;if(pr.sk)sk=true;cur=pr.from;path.push(cur);}
+    path.reverse();
+    const coords=path.map(n=>tg.coord[n]||coord[n]).filter(Boolean).map(c=>[c.lat,c.lon]);
+    return {u:p.u,v:p.v,line:'__move__',connector:true,min:p.min,sk,coords};
+  });
   const aug=[...compEdges,...conns];
   const walk=eulerPath(aug);
   const byPair={};aug.forEach(e=>{[[e.u,e.v],[e.v,e.u]].forEach(p=>{(byPair[p[0]+''+p[1]]=byPair[p[0]+''+p[1]]||[]).push(e);});});
@@ -470,39 +511,42 @@ function planComponent(compEdges,coord){
   for(let i=0;i<walk.length-1;i++){
     const arr=byPair[walk[i]+''+walk[i+1]]||[];
     const e=arr.find(x=>!x._used)||arr[0]; if(e)e._used=true;
-    segs.push({from:walk[i],to:walk[i+1],line:e?e.line:'?'});
+    segs.push({from:walk[i],to:walk[i+1],line:e?e.line:'?',sk:e&&e.sk,min:e&&e.min});
   }
-  return {segs,conns,rideKm:compEdges.reduce((s,e)=>s+e.km,0),moveKm:conns.reduce((s,e)=>s+e.km,0),
-          lines:[...new Set(compEdges.map(e=>e.line))],odd:odd.length};
+  const rideKm=compEdges.reduce((s,e)=>s+e.km,0);
+  const moveMin=conns.reduce((s,e)=>s+(isFinite(e.min)?e.min:0),0);
+  return {segs,conns,rideKm,rideMin:rideKm/SPEED_LOCAL*60,moveMin,lines:[...new Set(compEdges.map(e=>e.line))],odd:odd.length};
 }
 async function renderRoute(){
   if(curPref==null){alert('先に都道府県／新幹線を選んでください');return;}
-  const box=$('diagram'); box.innerHTML='<div class="hint">効率ルートを計算中…（路線を読み込み中）</div>';
+  const box=$('diagram'); box.innerHTML='<div class="hint">効率ルートを計算中…（路線網を構築・最短経路を計算中）</div>';
   await Promise.allSettled((prefLines[curPref]||[]).map(l=>loadLine(l.line_cd)));
   const lines=(prefLines[curPref]||[]).map(l=>{const c=lineCache[l.line_cd];if(c)c._cd=l.line_cd;return c;}).filter(Boolean);
   const {edges,coord}=buildUnridden(lines);
   if(!edges.length){box.innerHTML='<div class="hint">🎉 この地域に未乗区間はありません（全て乗車済み）。</div>';routeData=null;return;}
+  const tg=await buildTravelGraph(lines);
   const comps=components(edges).sort((a,b)=>b.length-a.length);
-  const ride=[],move=[]; let totRide=0,totMove=0;
+  const ride=[],move=[]; let totRideKm=0,totRideMin=0,totMoveMin=0;
   const blocks=comps.map((c,ci)=>{
-    const p=planComponent(c,coord); totRide+=p.rideKm; totMove+=p.moveKm;
+    const p=planComponent(c,coord,tg); totRideKm+=p.rideKm; totRideMin+=p.rideMin; totMoveMin+=p.moveMin;
     c.forEach(e=>ride.push(e)); p.conns.forEach(e=>move.push(e));
-    let runLine=null,runFrom=null,last=null;const rows=[];
-    const flush=to=>{if(runLine!==null)rows.push(runLine==='__move__'
-      ?`<div style="color:#888;padding:1px 0">↪ 移動／折返し ${runFrom} → ${to}</div>`
-      :`<div style="padding:2px 0">🚃 <b>${runLine}</b>：${runFrom} → ${to}</div>`);};
-    p.segs.forEach(s=>{if(s.line!==runLine){if(runLine!==null)flush(s.from);runLine=s.line;runFrom=s.from;}last=s.to;});
-    flush(last);
+    const rows=[]; let runLine=null,runFrom=null,last=null;
+    const flushRide=to=>{ if(runLine!==null){rows.push(`<div style="padding:2px 0">🚃 <b>${runLine}</b>：${runFrom} → ${to}</div>`);runLine=null;} };
+    p.segs.forEach(s=>{ last=s.to;
+      if(s.line==='__move__'){ flushRide(s.from);
+        rows.push(`<div style="color:#888;padding:1px 0">↪ 移動／折返し ${s.from} → ${s.to}（${s.sk?'🚄新幹線含む ':''}約${fmtH(s.min||0)}）</div>`);
+      }else{ if(runLine===null){runLine=s.line;runFrom=s.from;} else if(s.line!==runLine){flushRide(s.from);runLine=s.line;runFrom=s.from;} }
+    });
+    flushRide(last);
     return `<div style="border:1px solid var(--bd);border-radius:8px;padding:8px 10px;margin:8px 0">
-      <div style="font-weight:600;font-size:13px;margin-bottom:4px">まとまり${ci+1}　<span style="color:#888;font-weight:400">乗車約${p.rideKm.toFixed(0)}km・移動約${p.moveKm.toFixed(0)}km</span></div>
+      <div style="font-weight:600;font-size:13px;margin-bottom:4px">まとまり${ci+1}　<span style="color:#888;font-weight:400">乗車約${p.rideKm.toFixed(0)}km（${fmtH(p.rideMin)}）・移動${fmtH(p.moveMin)}</span></div>
       <div style="font-size:13px;line-height:1.5">${rows.join('')}</div></div>`;
   });
   routeData={coord,ride,move};
-  const hours=((totRide+totMove)/45).toFixed(1);
   box.innerHTML=`<div class="diagTitle">🧭 ${prefTitle(curPref)} 効率乗りつぶしルート（未乗のみ）</div>`+
     `<div class="diagSub">未乗 <b>${edges.length}</b>区間／${comps.length}まとまり　`+
-    `<b style="color:#e53935">乗車 約${totRide.toFixed(0)}km</b> ＋ 移動/折返し 約${totMove.toFixed(0)}km　所要目安 <b>約${hours}時間</b>`+
-    `<span style="color:#aaa">（表定45km/h・乗換待ち除く）</span><br>`+
+    `<b style="color:#e53935">乗車 約${totRideKm.toFixed(0)}km</b>（${fmtH(totRideMin)}）＋ 移動 ${fmtH(totMoveMin)}　＝ 所要目安 <b>約${fmtH(totRideMin+totMoveMin)}</b>`+
+    `<span style="color:#aaa">（在来${SPEED_LOCAL}/新幹線${SPEED_SK}km/h・乗換待ち除く）</span><br>`+
     `<button class="btn" id="routeMap" style="margin-top:6px">🗺 地図でルート確認</button> `+
     `<button class="btn" id="routeBack">← 路線一覧へ</button></div>`+blocks.join('');
   $('routeBack').onclick=()=>{$('diagram').innerHTML='<div class="hint">左の路線をクリックすると路線図が出ます。</div>';};
@@ -518,9 +562,9 @@ function drawRoute(){
   (routeData.ride||[]).forEach(e=>{const a=routeData.coord[e.u],b=routeData.coord[e.v];if(!a||!b)return;
     const pl=L.polyline([[a.lat,a.lon],[b.lat,b.lon]],{color:'#e53935',weight:5,opacity:.9});
     pl.bindTooltip(`未乗 ${e.line}：${e.u}—${e.v}`,{sticky:true});pl.addTo(mgroup);pts.push([a.lat,a.lon],[b.lat,b.lon]);});
-  (routeData.move||[]).forEach(e=>{const a=routeData.coord[e.u],b=routeData.coord[e.v];if(!a||!b)return;
-    const pl=L.polyline([[a.lat,a.lon],[b.lat,b.lon]],{color:'#9e9e9e',weight:3,opacity:.85,dashArray:'4 8'});
-    pl.bindTooltip(`移動／折返し ${e.u}→${e.v}`,{sticky:true});pl.addTo(mgroup);});
+  (routeData.move||[]).forEach(m=>{ const path=(m.coords&&m.coords.length>1)?m.coords:null; if(!path)return;
+    const pl=L.polyline(path,{color:m.sk?'#1565c0':'#9e9e9e',weight:3,opacity:.85,dashArray:'4 8'});
+    pl.bindTooltip(`移動／折返し ${m.u}→${m.v}（約${fmtH(m.min||0)}${m.sk?'・🚄':''}）`,{sticky:true});pl.addTo(mgroup);});
   if(pts.length)map.fitBounds(pts,{padding:[30,30]});
 }
 
