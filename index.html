@@ -73,7 +73,7 @@
 <body>
 <header>
   <h1>🚆 鉄道 乗りつぶしマップ</h1>
-  <span class="tot">読込済み路線の進捗：<b id="totPct">0%</b> <span id="totSub" style="color:#888"></span></span>
+  <span class="tot">乗車済み 計：<b id="totPct">0区間</b> <span id="totSub" style="color:#888"></span></span>
   <div class="tabs">
     <div class="tab active" data-v="List">路線図・進捗</div>
     <div class="tab" data-v="Map">地図</div>
@@ -205,10 +205,9 @@ const total=cd=>{const l=lineCache[cd];if(!l)return 0;let t=0,n=l.stations.lengt
 const done=cd=>{const l=lineCache[cd];if(!l)return 0;let c=0,n=l.stations.length-1;for(let i=0;i<n;i++)if(!l.closed.has(i)&&ridden.has(sid(cd,l.stations,i)))c++;return c};
 
 function updateTot(){
-  let d=0,t=0;
-  for(const cd in lineCache){d+=done(cd);t+=total(cd)}
-  $('totPct').textContent=(t?Math.round(d/t*100):0)+'%';
-  $('totSub').textContent=t?`（${d}/${t}区間）`:'';
+  const lineN=new Set([...ridden].map(k=>k.split('|')[0])).size;
+  $('totPct').textContent=ridden.size.toLocaleString()+'区間';
+  $('totSub').textContent=ridden.size?`（${lineN}路線）`:'';
 }
 
 function prefProgress(p){
