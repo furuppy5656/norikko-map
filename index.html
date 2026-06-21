@@ -166,7 +166,8 @@ const EXTRA_LINES=[
 const EXTRA_BY_CD={}; EXTRA_LINES.forEach(e=>EXTRA_BY_CD[e.line_cd]=e);
 const EXTEND={
 99426:{prepend:[{name:"大聖寺",lat:36.30031,lon:136.3142},{name:"加賀温泉",lat:36.32056,lon:136.35034},{name:"動橋",lat:36.32843,lon:136.38303},{name:"粟津",lat:36.35575,lon:136.42454},{name:"小松",lat:36.40255,lon:136.45293},{name:"明峰",lat:36.4253,lon:136.46311},{name:"能美根上",lat:36.45205,lon:136.45972},{name:"小舞子",lat:36.47637,lon:136.47493},{name:"美川",lat:36.486,lon:136.4892},{name:"加賀笠間",lat:36.50294,lon:136.52743},{name:"松任",lat:36.52671,lon:136.5662},{name:"野々市",lat:36.54164,lon:136.59804},{name:"西金沢",lat:36.55321,lon:136.62123}]},
-99907:{append:[{name:"櫛田神社前",lat:33.5908,lon:130.4108},{name:"博多",lat:33.5902,lon:130.42085}]}
+99907:{append:[{name:"櫛田神社前",lat:33.5908,lon:130.4108},{name:"博多",lat:33.5902,lon:130.42085}]},
+11641:{prepend:[{name:"大阪",lat:34.7024,lon:135.49519}]}
 };
 function closedSet(cd,stations){
   const c=CLOSED[cd], s=new Set(); if(!c)return s; const n=stations.length-1;
