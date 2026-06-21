@@ -416,7 +416,7 @@ async function drawNationwide(){
 let routeData=null;   // {coord, ride:[{u,v,line}], move:[{u,v,coords,min,sk}]}
 const SPEED_SK=200, SPEED_LOCAL=45;                     // 表定速度の目安(km/h)：新幹線/在来
 const SK_CDS=new Set(EXTRA_LINES.filter(e=>e.pref===0).map(e=>e.line_cd));  // 新幹線line_cd
-const fmtH=m=>{const h=Math.floor(m/60),mm=Math.round(m%60);return h?`${h}時間${mm?mm+'分':''}`:`${mm}分`;};
+const fmtH=m=>{let h=Math.floor(m/60),mm=Math.round(m%60);if(mm===60){h++;mm=0;}return h?`${h}時間${mm?mm+'分':''}`:`${mm}分`;};
 function haversine(a,b){const R=6371,toR=x=>x*Math.PI/180;
   const dla=toR(b.lat-a.lat),dlo=toR(b.lon-a.lon);
   const s=Math.sin(dla/2)**2+Math.cos(toR(a.lat))*Math.cos(toR(b.lat))*Math.sin(dlo/2)**2;
