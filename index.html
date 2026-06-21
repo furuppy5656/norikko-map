@@ -51,9 +51,9 @@
   .station.closeds .sname{color:#999}
   .tagX{font-size:10px;color:#fff;background:#9e9e9e;border-radius:4px;padding:1px 6px}
   /* 地図 */
-  #viewMap{display:none;height:80vh;padding:14px}
+  #viewMap{display:none;height:80vh;padding:14px;position:relative}
   #map{height:100%;border-radius:10px;border:1px solid var(--bd)}
-  .legend{position:absolute;z-index:600;background:rgba(255,255,255,.95);border-radius:8px;padding:8px 12px;font-size:12px;margin:8px;box-shadow:0 1px 4px rgba(0,0,0,.2)}
+  .legend{position:absolute;top:22px;right:22px;z-index:600;background:rgba(255,255,255,.95);border-radius:8px;padding:8px 12px;font-size:12px;box-shadow:0 1px 4px rgba(0,0,0,.2)}
   .legend i{display:inline-block;width:24px;border-top-width:4px;border-top-style:solid;vertical-align:middle;margin-right:6px}
   #loading{font-size:12px;color:#888}
   @media(max-width:640px){
@@ -102,9 +102,10 @@
 
 <div id="viewMap">
   <div class="legend">
-    <div><i style="border-color:var(--jr)"></i>JR（実線）</div>
-    <div><i style="border-color:var(--priv);border-top-style:dashed"></i>私鉄（破線）</div>
-    <div><i style="border-color:var(--green)"></i>乗車済み</div>
+    <div style="font-weight:500;margin-bottom:2px">乗車済み区間のみ表示</div>
+    <div><i style="border-color:var(--green)"></i>JR（実線）</div>
+    <div><i style="border-color:var(--green);border-top-style:dashed"></i>私鉄（破線）</div>
+    <div style="color:#888;font-size:11px">クリックで解除</div>
   </div>
   <div id="map"></div>
 </div>
@@ -305,16 +306,14 @@ function drawMap(){
   for(const l of lines){
     const lc=lineCache[l.line_cd]; if(!lc)continue;
     for(let i=0;i<lc.stations.length-1;i++){
+      if(!ridden.has(sid(l.line_cd,lc.stations,i))) continue;   // ★乗車済み区間だけ描く
       const a=lc.stations[i],b=lc.stations[i+1];
       if(!a.lat||!b.lat)continue;
-      const on=ridden.has(sid(l.line_cd,lc.stations,i)), closed=lc.closed.has(i);
       const pl=L.polyline([[a.lat,a.lon],[b.lat,b.lon]],{
-        color: closed?'#9e9e9e':(on?'#2e7d32':(lc.jr?'#1565c0':'#ef6c00')),
-        weight: closed?2.5:(on?6:3.5), opacity: closed?0.55:(on?1:0.8),
-        dashArray: closed?'3 6':(on?null:(lc.jr?null:'10 6')),
-        lineCap:'butt'});
-      pl.bindTooltip(`${lc.name}：${a.name}—${b.name}${closed?'（廃止）':''}`,{sticky:true});
-      pl.on('click',()=>{const id=sid(l.line_cd,lc.stations,i); ridden.has(id)?ridden.delete(id):ridden.add(id); commit()});
+        color:'#2e7d32', weight:6, opacity:1,
+        dashArray: lc.jr?null:'10 6', lineCap:'butt'});   // JR=実線 / 私鉄=破線
+      pl.bindTooltip(`${lc.name}：${a.name}—${b.name}`,{sticky:true});
+      pl.on('click',()=>{ridden.delete(sid(l.line_cd,lc.stations,i)); commit();});  // クリックで解除
       pl.addTo(mgroup); pts.push([a.lat,a.lon],[b.lat,b.lon]);
     }
   }
