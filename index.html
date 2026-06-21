@@ -78,7 +78,9 @@
     <div class="tab active" data-v="List">路線図・進捗</div>
     <div class="tab" data-v="Map">地図</div>
   </div>
-  <span style="margin-left:auto;display:flex;gap:6px">
+  <span style="margin-left:auto;display:flex;gap:6px;flex-wrap:wrap">
+    <button class="btn" id="gistSave" title="GitHubのGistに保存（スマホ⇄PC同期）">☁ 保存</button>
+    <button class="btn" id="gistLoad" title="GitHubのGistから読込（マージ）">☁ 読込</button>
     <button class="btn" id="export">バックアップ保存</button>
     <button class="btn" id="import">読み込み</button>
     <input type="file" id="importFile" accept="application/json" style="display:none">
@@ -614,6 +616,60 @@ $('mapAll').onclick=()=>{
   if(mapMode==='pref') $('mapAll').textContent='🗾 全国の乗車済みを表示';
   drawMap();
 };
+
+/* ---- GitHub Gist 同期（スマホ⇄PC。トークンは端末ごとlocalStorageに1回だけ。gistはファイル名で自動検索） ---- */
+const GH_KEY='norikko_gh', GIST_KEY='norikko_gist', GIST_FILE='norikko-rail-map.json';
+function ghToken(force){
+  let t=force?null:localStorage.getItem(GH_KEY);
+  if(!t){ t=prompt('GitHubの個人アクセストークンを貼り付け（gistスコープのみ・初回だけ）\n作成: https://github.com/settings/tokens/new （Scopes=gist にチェック）'); if(t){t=t.trim();localStorage.setItem(GH_KEY,t);} }
+  return t;
+}
+async function ghApi(path,opt={}){
+  const t=ghToken(); if(!t)throw new Error('トークン未設定');
+  const r=await fetch('https://api.github.com'+path,{...opt,headers:{'Authorization':'Bearer '+t,'Accept':'application/vnd.github+json',...(opt.headers||{})}});
+  if(r.status===401){localStorage.removeItem(GH_KEY);throw new Error('トークンが無効です（再入力してください）');}
+  if(!r.ok)throw new Error('GitHub APIエラー '+r.status);
+  return r.json();
+}
+async function findGist(){
+  let id=localStorage.getItem(GIST_KEY);
+  if(id){ try{ await ghApi('/gists/'+id); return id; }catch(e){ localStorage.removeItem(GIST_KEY); } }
+  const list=await ghApi('/gists?per_page=100');
+  const g=(list||[]).find(x=>x.files&&x.files[GIST_FILE]);
+  if(g){ localStorage.setItem(GIST_KEY,g.id); return g.id; }
+  return null;
+}
+async function gistSave(){
+  const btn=$('gistSave'),old=btn.textContent; btn.textContent='☁ 保存中…';
+  try{
+    if(!ghToken()){btn.textContent=old;return;}
+    const content=JSON.stringify([...ridden]);
+    let id=await findGist();
+    if(id){ await ghApi('/gists/'+id,{method:'PATCH',body:JSON.stringify({files:{[GIST_FILE]:{content}}})}); }
+    else { const g=await ghApi('/gists',{method:'POST',body:JSON.stringify({description:'鉄道乗りつぶしマップ 同期データ',public:false,files:{[GIST_FILE]:{content}}})}); localStorage.setItem(GIST_KEY,g.id); }
+    alert('☁ Gistに保存しました（'+ridden.size+'区間）');
+  }catch(e){ alert('Gist保存に失敗: '+e.message); }
+  btn.textContent=old;
+}
+async function gistLoad(){
+  const btn=$('gistLoad'),old=btn.textContent; btn.textContent='☁ 読込中…';
+  try{
+    if(!ghToken()){btn.textContent=old;return;}
+    const id=await findGist();
+    if(!id){ alert('保存済みのGistが見つかりません。先に「☁ 保存」をしてください。'); btn.textContent=old; return; }
+    const g=await ghApi('/gists/'+id); const f=g.files[GIST_FILE]; let txt=f.content;
+    if(f.truncated){ txt=await (await fetch(f.raw_url)).text(); }
+    const arr=JSON.parse(txt); if(!Array.isArray(arr))throw new Error('形式不正');
+    const before=ridden.size; arr.map(String).forEach(k=>ridden.add(k));  // マージ式（既存を消さない）
+    save();
+    await syncMini(); updateTot(); if(curPref)renderLineList(); if(curLine)renderDiagram(); if(mapInited)drawMap();
+    alert('☁ Gistから読込（+'+(ridden.size-before)+'区間 / 合計'+ridden.size+'区間）');
+  }catch(e){ alert('Gist読込に失敗: '+e.message); }
+  btn.textContent=old;
+}
+$('gistSave').onclick=gistSave;
+$('gistLoad').onclick=gistLoad;
+
 updateTot();
 syncMini().then(ch=>{ if(ch){updateTot();if(curPref)renderLineList();if(curLine)renderDiagram();if(mapInited)drawMap();} });  // 起動時：既存の新幹線記録から在来線を同期
 </script>
