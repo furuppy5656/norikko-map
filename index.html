@@ -88,6 +88,15 @@
   </span>
 </header>
 
+<div id="syncBar" style="display:none;background:#fff;border-bottom:1px solid var(--bd);padding:8px 16px;font-size:13px;align-items:center;gap:8px;flex-wrap:wrap">
+  <span>🔑 GitHubトークン</span>
+  <input id="ghTokenInput" type="password" placeholder="ghp_… (gistスコープのみ)" autocomplete="off" style="flex:1;min-width:200px;padding:6px 8px;border:1px solid #ccc;border-radius:6px">
+  <button class="btn" id="ghTokenSave">設定</button>
+  <button class="btn" id="ghTokenClear">クリア</button>
+  <a href="https://github.com/settings/tokens/new" target="_blank" rel="noopener" style="font-size:12px">トークンを作る</a>
+  <span id="ghTokenStatus" style="color:#888;font-size:12px"></span>
+</div>
+
 <div id="viewList">
   <div class="col" id="left">
     <div style="display:flex;gap:6px;align-items:center">
@@ -619,11 +628,14 @@ $('mapAll').onclick=()=>{
 
 /* ---- GitHub Gist 同期（スマホ⇄PC。トークンは端末ごとlocalStorageに1回だけ。gistはファイル名で自動検索） ---- */
 const GH_KEY='norikko_gh', GIST_KEY='norikko_gist', GIST_FILE='norikko-rail-map.json';
-function ghToken(force){
-  let t=force?null:localStorage.getItem(GH_KEY);
-  if(!t){ t=prompt('GitHubの個人アクセストークンを貼り付け（gistスコープのみ・初回だけ）\n作成: https://github.com/settings/tokens/new （Scopes=gist にチェック）'); if(t){t=t.trim();localStorage.setItem(GH_KEY,t);} }
-  return t;
+function ghToken(){ return localStorage.getItem(GH_KEY)||''; }   // prompt廃止（スマホで弾かれるため）。入力はsyncBarで
+function showSyncBar(msg){
+  const bar=$('syncBar'); bar.style.display='flex';
+  $('ghTokenStatus').textContent=msg||(ghToken()?'設定済み（変更する場合のみ入力）':'未設定：トークンを入れて「設定」を押してください');
+  if(!ghToken()) $('ghTokenInput').focus();
 }
+$('ghTokenSave').onclick=()=>{ const v=$('ghTokenInput').value.trim(); if(!v){alert('トークンを入力してください');return;} localStorage.setItem(GH_KEY,v); $('ghTokenInput').value=''; $('ghTokenStatus').textContent='✅ 設定しました。☁保存／☁読込が使えます'; };
+$('ghTokenClear').onclick=()=>{ localStorage.removeItem(GH_KEY); localStorage.removeItem(GIST_KEY); $('ghTokenStatus').textContent='クリアしました'; };
 async function ghApi(path,opt={}){
   const t=ghToken(); if(!t)throw new Error('トークン未設定');
   const r=await fetch('https://api.github.com'+path,{...opt,headers:{'Authorization':'Bearer '+t,'Accept':'application/vnd.github+json',...(opt.headers||{})}});
@@ -640,23 +652,29 @@ async function findGist(){
   return null;
 }
 async function gistSave(){
+  if(!ghToken()){ showSyncBar('まずトークンを設定してから「☁保存」を押してください'); return; }
   const btn=$('gistSave'),old=btn.textContent; btn.textContent='☁ 保存中…';
   try{
-    if(!ghToken()){btn.textContent=old;return;}
-    const content=JSON.stringify([...ridden]);
     let id=await findGist();
-    if(id){ await ghApi('/gists/'+id,{method:'PATCH',body:JSON.stringify({files:{[GIST_FILE]:{content}}})}); }
-    else { const g=await ghApi('/gists',{method:'POST',body:JSON.stringify({description:'鉄道乗りつぶしマップ 同期データ',public:false,files:{[GIST_FILE]:{content}}})}); localStorage.setItem(GIST_KEY,g.id); }
+    if(id){
+      const g=await ghApi('/gists/'+id); const f=g.files[GIST_FILE]; let txt=f.content;
+      if(f.truncated) txt=await (await fetch(f.raw_url)).text();
+      let remoteN=0; try{ const a=JSON.parse(txt); if(Array.isArray(a))remoteN=a.length; }catch(e){}
+      if(remoteN>ridden.size && !confirm(`⚠ クラウドには ${remoteN}区間 ありますが、この端末は ${ridden.size}区間 です。\nこのまま保存するとクラウドが ${ridden.size}区間 に減ります。\n\nふつうは先に「☁読込」でクラウドと統合してから保存します。\nそれでも上書きしますか？`)){ btn.textContent=old; return; }
+      await ghApi('/gists/'+id,{method:'PATCH',body:JSON.stringify({files:{[GIST_FILE]:{content:JSON.stringify([...ridden])}}})});
+    } else {
+      const g=await ghApi('/gists',{method:'POST',body:JSON.stringify({description:'鉄道乗りつぶしマップ 同期データ',public:false,files:{[GIST_FILE]:{content:JSON.stringify([...ridden])}}})}); localStorage.setItem(GIST_KEY,g.id);
+    }
     alert('☁ Gistに保存しました（'+ridden.size+'区間）');
-  }catch(e){ alert('Gist保存に失敗: '+e.message); }
+  }catch(e){ alert('Gist保存に失敗: '+e.message+'\n（トークンが正しいか確認してください）'); showSyncBar(); }
   btn.textContent=old;
 }
 async function gistLoad(){
+  if(!ghToken()){ showSyncBar('まずトークンを設定してから「☁読込」を押してください'); return; }
   const btn=$('gistLoad'),old=btn.textContent; btn.textContent='☁ 読込中…';
   try{
-    if(!ghToken()){btn.textContent=old;return;}
     const id=await findGist();
-    if(!id){ alert('保存済みのGistが見つかりません。先に「☁ 保存」をしてください。'); btn.textContent=old; return; }
+    if(!id){ alert('保存済みのGistが見つかりません。記録のある端末で先に「☁ 保存」をしてください。'); btn.textContent=old; return; }
     const g=await ghApi('/gists/'+id); const f=g.files[GIST_FILE]; let txt=f.content;
     if(f.truncated){ txt=await (await fetch(f.raw_url)).text(); }
     const arr=JSON.parse(txt); if(!Array.isArray(arr))throw new Error('形式不正');
@@ -664,7 +682,7 @@ async function gistLoad(){
     save();
     await syncMini(); updateTot(); if(curPref)renderLineList(); if(curLine)renderDiagram(); if(mapInited)drawMap();
     alert('☁ Gistから読込（+'+(ridden.size-before)+'区間 / 合計'+ridden.size+'区間）');
-  }catch(e){ alert('Gist読込に失敗: '+e.message); }
+  }catch(e){ alert('Gist読込に失敗: '+e.message+'\n（トークンが正しいか確認してください）'); showSyncBar(); }
   btn.textContent=old;
 }
 $('gistSave').onclick=gistSave;
