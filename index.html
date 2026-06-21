@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>鉄道 乗りつぶしマップ</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<style>
+  :root{--green:#2e7d32;--jr:#1565c0;--priv:#ef6c00;--bg:#fafafa;--bd:#e0e0e0}
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN",sans-serif;color:#222;background:var(--bg)}
+  header{background:#fff;border-bottom:1px solid var(--bd);padding:10px 16px;display:flex;align-items:center;gap:14px;flex-wrap:wrap;position:sticky;top:0;z-index:500}
+  header h1{font-size:16px;margin:0}
+  .tot{font-size:13px;color:#555}
+  .tot b{font-size:18px;color:var(--green)}
+  .tabs{display:flex;gap:6px}
+  .tab{border:1px solid var(--bd);background:#fff;border-radius:8px 8px 0 0;padding:6px 14px;cursor:pointer;font-size:13px}
+  .tab.active{background:var(--green);color:#fff;border-color:var(--green)}
+  .btn{border:1px solid #bbb;background:#fff;border-radius:6px;padding:5px 10px;font-size:12px;cursor:pointer}
+  .btn:hover{background:#f0f0f0}
+  #viewList{display:flex;gap:14px;padding:14px;align-items:flex-start;flex-wrap:wrap}
+  .col{background:#fff;border:1px solid var(--bd);border-radius:10px;padding:12px}
+  #left{flex:1 1 320px;min-width:300px;max-height:78vh;overflow:auto}
+  #right{flex:2 1 420px;min-width:320px;max-height:78vh;overflow:auto}
+  select{font-size:14px;padding:6px 8px;border-radius:6px;border:1px solid #ccc;width:100%}
+  .lineRow{display:flex;align-items:center;gap:8px;padding:7px 6px;border-radius:6px;cursor:pointer;border:1px solid transparent}
+  .lineRow:hover{background:#f3f7f3}
+  .lineRow.sel{background:#e8f5e9;border-color:#bfe0c2}
+  .lineRow .nm{flex:1;font-size:13px}
+  .tagJR{font-size:10px;color:#fff;background:var(--jr);border-radius:4px;padding:1px 5px}
+  .tagPV{font-size:10px;color:#fff;background:var(--priv);border-radius:4px;padding:1px 5px}
+  .bar{height:7px;border-radius:4px;background:#e6e6e6;overflow:hidden;flex:0 0 70px}
+  .bar > i{display:block;height:100%;background:var(--green)}
+  .pct{font-size:11px;color:#555;flex:0 0 38px;text-align:right}
+  .hint{font-size:12px;color:#666;margin:4px 0 10px}
+  /* 路線図 */
+  .diagTitle{font-size:15px;font-weight:600;margin:0 0 2px}
+  .diagSub{font-size:12px;color:#555;margin:0 0 12px}
+  .station{display:flex;align-items:center;gap:10px;cursor:pointer;padding:2px 4px;border-radius:6px}
+  .station:hover{background:#f3f7f3}
+  .station.start{background:#fff3e0;outline:1px solid #ffcc80}
+  .dot{width:13px;height:13px;border-radius:50%;border:3px solid #999;background:#fff;flex:0 0 auto;z-index:1}
+  .station.done .dot{border-color:var(--green)}
+  .sname{font-size:13px}
+  .seg{margin-left:5px;width:0;border-left:6px solid #ddd;height:20px}
+  .seg.done{border-color:var(--green)}
+  .seg.jr{border-left-style:solid}
+  .seg.pv{border-left-style:dashed}
+  .seg.click{cursor:pointer}
+  .seg.closed{border-left-color:#bdbdbd !important;border-left-style:dotted}
+  .station.closeds .sname{color:#999}
+  .tagX{font-size:10px;color:#fff;background:#9e9e9e;border-radius:4px;padding:1px 6px}
+  /* 地図 */
+  #viewMap{display:none;height:80vh;padding:14px}
+  #map{height:100%;border-radius:10px;border:1px solid var(--bd)}
+  .legend{position:absolute;z-index:600;background:rgba(255,255,255,.95);border-radius:8px;padding:8px 12px;font-size:12px;margin:8px;box-shadow:0 1px 4px rgba(0,0,0,.2)}
+  .legend i{display:inline-block;width:24px;border-top-width:4px;border-top-style:solid;vertical-align:middle;margin-right:6px}
+  #loading{font-size:12px;color:#888}
+  @media(max-width:640px){
+    header{padding:8px 10px;gap:8px}
+    header h1{font-size:15px;width:100%;margin-bottom:2px}
+    .tot{font-size:12px}
+    #viewList{flex-direction:column;padding:8px;gap:8px}
+    #left,#right{flex:1 1 auto;width:100%;min-width:0;max-height:none}
+    #left{max-height:46vh}
+    #viewMap{height:72vh;padding:8px}
+    .station{padding:6px 4px}     /* タッチしやすく */
+    .lineRow{padding:10px 6px}
+    .btn{padding:7px 10px}
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>🚆 鉄道 乗りつぶしマップ</h1>
+  <span class="tot">読込済み路線の進捗：<b id="totPct">0%</b> <span id="totSub" style="color:#888"></span></span>
+  <div class="tabs">
+    <div class="tab active" data-v="List">路線図・進捗</div>
+    <div class="tab" data-v="Map">地図</div>
+  </div>
+  <span style="margin-left:auto;display:flex;gap:6px">
+    <button class="btn" id="export">バックアップ保存</button>
+    <button class="btn" id="import">読み込み</button>
+    <input type="file" id="importFile" accept="application/json" style="display:none">
+    <button class="btn" id="reset">リセット</button>
+  </span>
+</header>
+
+<div id="viewList">
+  <div class="col" id="left">
+    <div style="display:flex;gap:6px;align-items:center">
+      <select id="pref" style="flex:1"></select>
+      <button class="btn" id="refresh" title="この都道府県を再読み込み">🔄 再読込</button>
+    </div>
+    <div class="hint" id="prefHead">都道府県を選ぶと路線一覧が出ます。</div>
+    <div id="lineList"><span id="loading"></span></div>
+  </div>
+  <div class="col" id="right">
+    <div id="diagram"><div class="hint">左の路線をクリックすると路線図が出ます。<br>駅を2つクリックすると、その間が「乗車済み（緑）」に塗りつぶされます（もう一度同じ2駅で解除）。区間の線を直接クリックでも1区間ずつ切替できます。</div></div>
+  </div>
+</div>
+
+<div id="viewMap">
+  <div class="legend">
+    <div><i style="border-color:var(--jr)"></i>JR（実線）</div>
+    <div><i style="border-color:var(--priv);border-top-style:dashed"></i>私鉄（破線）</div>
+    <div><i style="border-color:var(--green)"></i>乗車済み</div>
+  </div>
+  <div id="map"></div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+const API='https://ny-a.github.io/ekidata/api';
+const PREFS={1:'北海道',2:'青森県',3:'岩手県',4:'宮城県',5:'秋田県',6:'山形県',7:'福島県',8:'茨城県',9:'栃木県',10:'群馬県',11:'埼玉県',12:'千葉県',13:'東京都',14:'神奈川県',15:'新潟県',16:'富山県',17:'石川県',18:'福井県',19:'山梨県',20:'長野県',21:'岐阜県',22:'静岡県',23:'愛知県',24:'三重県',25:'滋賀県',26:'京都府',27:'大阪府',28:'兵庫県',29:'奈良県',30:'和歌山県',31:'鳥取県',32:'島根県',33:'岡山県',34:'広島県',35:'山口県',36:'徳島県',37:'香川県',38:'愛媛県',39:'高知県',40:'福岡県',41:'佐賀県',42:'長崎県',43:'熊本県',44:'大分県',45:'宮崎県',46:'鹿児島県',47:'沖縄県'};
+
+// ===== 更新パッチ（手動補正） =====
+// 廃止区間：進捗の分母から除外し「廃止」表示。履歴として塗ることは可能。
+const CLOSED={
+  11118:{mode:'all',  note:'旅客廃止 2016（北海道新幹線へ移行）'},
+  11111:{mode:'after',at:'鵡川',         note:'鵡川〜様似 廃止 2021'},
+  11106:{mode:'between',from:'富良野',to:'新得', note:'富良野〜新得 廃止 2024'},
+  11113:{mode:'all',  note:'深川〜留萌 全線廃止 2026'}
+};
+// 新規開業（ekidata未収録）。line_cdは9万台で衝突回避。
+const EXTRA_LINES=[
+  {line_cd:900001,pref:9,line_name:'宇都宮ライトレール',stations:[
+    {name:'宇都宮駅東口',lat:36.5589,lon:139.8983},{name:'東宿郷',lat:36.5583,lon:139.9041},
+    {name:'駅東公園前',lat:36.5580,lon:139.9077},{name:'峰',lat:36.5575,lon:139.9157},
+    {name:'陽東3丁目',lat:36.5573,lon:139.9228},{name:'宇都宮大学陽東キャンパス',lat:36.5570,lon:139.9297},
+    {name:'平石',lat:36.5550,lon:139.9393},{name:'平石中央小学校前',lat:36.5548,lon:139.9448},
+    {name:'飛山城跡',lat:36.5484,lon:139.9634},{name:'清陵高校前',lat:36.5449,lon:139.9763},
+    {name:'清原地区市民センター前',lat:36.5476,lon:139.9842},{name:'グリーンスタジアム前',lat:36.5547,lon:139.9825},
+    {name:'ゆいの杜西',lat:36.5673,lon:139.9867},{name:'ゆいの杜中央',lat:36.5677,lon:139.9925},
+    {name:'ゆいの杜東',lat:36.5676,lon:139.9983},{name:'芳賀台',lat:36.5663,lon:140.0054},
+    {name:'工業団地管理センター前',lat:36.5650,lon:140.0107},{name:'かしの森公園前',lat:36.5724,lon:140.0146},
+    {name:'芳賀・高根沢工業団地',lat:36.5784,lon:140.0120}
+  ]}
+];
+const EXTRA_BY_CD={}; EXTRA_LINES.forEach(e=>EXTRA_BY_CD[e.line_cd]=e);
+function closedSet(cd,stations){
+  const c=CLOSED[cd], s=new Set(); if(!c)return s; const n=stations.length-1;
+  const idx=nm=>stations.findIndex(x=>x.name===nm);
+  if(c.mode==='all'){for(let i=0;i<n;i++)s.add(i);return s;}
+  if(c.mode==='after'){const a=idx(c.at);if(a>=0)for(let i=a;i<n;i++)s.add(i);}
+  if(c.mode==='between'){let a=idx(c.from),b=idx(c.to);if(a>b){const t=a;a=b;b=t;}if(a>=0&&b>=0)for(let i=a;i<b;i++)s.add(i);}
+  return s;
+}
+
+let ridden=new Set(JSON.parse(localStorage.getItem('norikko')||'[]'));
+const lineCache={}, prefLines={};
+let curPref=null, curLine=null, pending=null;
+
+const $=id=>document.getElementById(id);
+function save(){localStorage.setItem('norikko',JSON.stringify([...ridden]))}
+async function getJSON(u){const r=await fetch(u);if(!r.ok)throw new Error('HTTP '+r.status);return r.json()}
+
+async function loadLine(cd){
+  if(lineCache[cd])return lineCache[cd];
+  const ex=EXTRA_BY_CD[cd];
+  if(ex)return lineCache[cd]={name:ex.line_name,jr:false,stations:ex.stations,closed:new Set()};
+  const d=await getJSON(`${API}/l/${cd}.json`);
+  const st=(d.station_l||[]).map(s=>({name:s.station_name,cd:s.station_cd,lon:+s.lon,lat:+s.lat}));
+  return lineCache[cd]={name:d.line_name,jr:/^JR/.test(d.line_name),stations:st,closed:closedSet(cd,st)};
+}
+// 進捗は「現役区間（廃止を除く）」で計算
+const total=cd=>{const l=lineCache[cd];if(!l)return 0;let t=0,n=l.stations.length-1;for(let i=0;i<n;i++)if(!l.closed.has(i))t++;return t};
+const done=cd=>{const l=lineCache[cd];if(!l)return 0;let c=0,n=l.stations.length-1;for(let i=0;i<n;i++)if(!l.closed.has(i)&&ridden.has(cd+'-'+i))c++;return c};
+
+function updateTot(){
+  let d=0,t=0;
+  for(const cd in lineCache){d+=done(cd);t+=total(cd)}
+  $('totPct').textContent=(t?Math.round(d/t*100):0)+'%';
+  $('totSub').textContent=t?`（${d}/${t}区間）`:'';
+}
+
+function prefProgress(p){
+  let d=0,t=0;for(const l of (prefLines[p]||[])){d+=done(l.line_cd);t+=total(l.line_cd)}
+  return {d,t,pct:t?Math.round(d/t*100):0};
+}
+
+async function selectPref(p){
+  curPref=p; curLine=null;
+  const box=$('lineList'); box.innerHTML='<div class="hint">路線を読み込み中…</div>';
+  try{
+    if(!prefLines[p]){
+      prefLines[p]=((await getJSON(`${API}/p/${p}.json`)).line)||[];
+      EXTRA_LINES.filter(e=>e.pref===p).forEach(e=>{ if(!prefLines[p].some(x=>x.line_cd===e.line_cd)) prefLines[p].push({line_cd:e.line_cd,line_name:e.line_name}); });
+    }
+  }catch(e){
+    box.innerHTML='<div style="color:#c00;font-size:13px">路線の取得に失敗（'+e.message+'）。「🔄 再読込」を押してください。</div>'; return;
+  }
+  renderLineList(); updateTot();                       // 路線名は即表示
+  Promise.allSettled(prefLines[p].map(l=>loadLine(l.line_cd)))  // 進捗は読めた分から順次反映
+    .then(()=>{ if(curPref===p){ renderLineList(); updateTot(); } });
+}
+
+function renderLineList(){
+  const pr=prefProgress(curPref);
+  $('prefHead').innerHTML=`<b>${PREFS[curPref]}</b>：${pr.pct}% <span style="color:#888">(${pr.d}/${pr.t}区間)</span>`;
+  const box=$('lineList'); box.innerHTML='';
+  for(const l of prefLines[curPref]){
+    const cd=l.line_cd, loaded=!!lineCache[cd], t=total(cd), d=done(cd), pct=t?Math.round(d/t*100):0;
+    const jr=/^JR/.test(l.line_name);
+    const allClosed=CLOSED[cd]&&CLOSED[cd].mode==='all';
+    const row=document.createElement('div');
+    row.className='lineRow'+(cd===curLine?' sel':'');
+    row.innerHTML=`<span class="${jr?'tagJR':'tagPV'}">${jr?'JR':'私鉄'}</span>`+
+      `<span class="nm">${l.line_name}${allClosed?' <span class="tagX">廃止</span>':''}</span>`+
+      `<span class="bar"><i style="width:${loaded&&!allClosed?pct:0}%"></i></span>`+
+      `<span class="pct">${allClosed?'廃止':(loaded?pct+'%':'…')}</span>`;
+    row.onclick=()=>selectLine(cd);
+    box.appendChild(row);
+  }
+}
+
+function selectLine(cd){curLine=cd; pending=null; renderLineList(); renderDiagram()}
+
+function renderDiagram(){
+  const l=lineCache[curLine]; if(!l)return;
+  const N=l.stations.length-1;                       // 全区間数
+  const t=total(curLine), d=done(curLine), pct=t?Math.round(d/t*100):0;  // 現役分の進捗
+  const box=$('diagram'); box.innerHTML='';
+  const cinfo=CLOSED[curLine];
+  const h=document.createElement('div');
+  h.innerHTML=`<div class="diagTitle">${l.jr?'🔵':'🟠'} ${l.name}${cinfo?' <span class="tagX">廃止区間あり</span>':''}</div>`+
+    `<div class="diagSub">進捗 <b style="color:var(--green)">${pct}%</b>（${d}/${t}区間・現役）`+
+    (cinfo?`　<span style="color:#888">※${cinfo.note}</span>`:'')+`<br>`+
+    `<button class="btn" id="allOn">現役を全部 乗車済み</button> <button class="btn" id="allOff">全部 解除</button></div>`;
+  box.appendChild(h);
+  l.stations.forEach((s,i)=>{
+    const isDone=(i<N&&!l.closed.has(i)&&ridden.has(curLine+'-'+i)) || (i>0&&!l.closed.has(i-1)&&ridden.has(curLine+'-'+(i-1)));
+    const stEl=document.createElement('div');
+    stEl.className='station'+(isDone?' done':'')+(pending===i?' start':'');
+    stEl.innerHTML=`<span class="dot"></span><span class="sname">${s.name}</span>`;
+    stEl.onclick=()=>clickStation(i);
+    box.appendChild(stEl);
+    if(i<N){
+      const on=ridden.has(curLine+'-'+i), closed=l.closed.has(i);
+      const seg=document.createElement('div');
+      seg.className='seg click '+(l.jr?'jr':'pv')+(on?' done':'')+(closed?' closed':'');
+      seg.title=closed?'廃止区間（履歴として塗ることは可能）':'この区間を切替';
+      seg.onclick=()=>toggleSec(i);
+      box.appendChild(seg);
+    }
+  });
+  $('allOn').onclick=()=>{for(let i=0;i<N;i++)if(!l.closed.has(i))ridden.add(curLine+'-'+i);commit()};
+  $('allOff').onclick=()=>{for(let i=0;i<N;i++)ridden.delete(curLine+'-'+i);commit()};
+}
+
+function clickStation(idx){
+  if(pending===null){pending=idx; renderDiagram(); return}
+  const a=Math.min(pending,idx), b=Math.max(pending,idx);
+  if(a!==b){
+    let allOn=true; for(let i=a;i<b;i++)if(!ridden.has(curLine+'-'+i)){allOn=false;break}
+    for(let i=a;i<b;i++){const id=curLine+'-'+i; allOn?ridden.delete(id):ridden.add(id)}
+  }
+  pending=null; commit();
+}
+function toggleSec(i){const id=curLine+'-'+i; ridden.has(id)?ridden.delete(id):ridden.add(id); commit()}
+function commit(){save(); renderDiagram(); renderLineList(); updateTot(); if(mapInited)drawMap()}
+
+/* ---- 地図 ---- */
+let map=null, mapInited=false, mgroup=null;
+function initMap(){
+  map=L.map('map',{minZoom:4,maxZoom:18}).setView([36.2,138.2],5);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'&copy; OpenStreetMap'}).addTo(map);
+  mgroup=L.layerGroup().addTo(map); mapInited=true;
+}
+function drawMap(){
+  if(!mapInited)return; mgroup.clearLayers();
+  const lines=(prefLines[curPref]||[]); const pts=[];
+  for(const l of lines){
+    const lc=lineCache[l.line_cd]; if(!lc)continue;
+    for(let i=0;i<lc.stations.length-1;i++){
+      const a=lc.stations[i],b=lc.stations[i+1];
+      if(!a.lat||!b.lat)continue;
+      const on=ridden.has(l.line_cd+'-'+i), closed=lc.closed.has(i);
+      const pl=L.polyline([[a.lat,a.lon],[b.lat,b.lon]],{
+        color: closed?'#9e9e9e':(on?'#2e7d32':(lc.jr?'#1565c0':'#ef6c00')),
+        weight: closed?2.5:(on?6:3.5), opacity: closed?0.55:(on?1:0.8),
+        dashArray: closed?'3 6':(on?null:(lc.jr?null:'10 6')),
+        lineCap:'butt'});
+      pl.bindTooltip(`${lc.name}：${a.name}—${b.name}${closed?'（廃止）':''}`,{sticky:true});
+      pl.on('click',()=>{const id=l.line_cd+'-'+i; ridden.has(id)?ridden.delete(id):ridden.add(id); commit()});
+      pl.addTo(mgroup); pts.push([a.lat,a.lon],[b.lat,b.lon]);
+    }
+  }
+  if(pts.length)map.fitBounds(pts,{padding:[30,30]});
+}
+
+/* ---- UI ---- */
+const sel=$('pref'); sel.innerHTML='<option value="">▼ 都道府県を選択</option>'+Object.entries(PREFS).map(([k,v])=>`<option value="${k}">${v}</option>`).join('');
+sel.onchange=()=>{if(sel.value){curLine=null;$('diagram').innerHTML='<div class="hint">路線をクリックしてください。</div>';selectPref(+sel.value)}};
+$('refresh').onclick=()=>{ if(!curPref){alert('先に都道府県を選んでください');return} delete prefLines[curPref]; $('diagram').innerHTML='<div class="hint">路線をクリックしてください。</div>'; curLine=null; selectPref(curPref); };
+
+document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>{
+  document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
+  t.classList.add('active');
+  const v=t.dataset.v;
+  $('viewList').style.display=v==='List'?'flex':'none';
+  $('viewMap').style.display=v==='Map'?'block':'none';
+  if(v==='Map'){ if(!mapInited)initMap(); setTimeout(()=>{map.invalidateSize();drawMap()},50); }
+});
+
+$('reset').onclick=()=>{if(confirm('乗車記録をすべて消去しますか？')){ridden=new Set();save();updateTot();renderLineList();if(curLine)renderDiagram();if(mapInited)drawMap()}};
+
+$('export').onclick=()=>{
+  const d=new Date(), ymd=d.getFullYear()+String(d.getMonth()+1).padStart(2,'0')+String(d.getDate()).padStart(2,'0');
+  const blob=new Blob([JSON.stringify([...ridden])],{type:'application/json'});
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
+  a.download=`norikko_backup_${ymd}.json`; a.click(); URL.revokeObjectURL(a.href);
+};
+$('import').onclick=()=>$('importFile').click();
+$('importFile').onchange=e=>{
+  const f=e.target.files[0]; if(!f)return;
+  const r=new FileReader();
+  r.onload=()=>{ try{
+    const arr=JSON.parse(r.result); if(!Array.isArray(arr))throw new Error('形式が不正');
+    ridden=new Set(arr.map(String)); save(); updateTot();
+    if(curPref)renderLineList(); if(curLine)renderDiagram(); if(mapInited)drawMap();
+    alert('読み込みました（'+ridden.size+'区間）');
+  }catch(err){ alert('読み込み失敗: '+err.message); } e.target.value=''; };
+  r.readAsText(f);
+};
+
+updateTot();
+</script>
+</body>
+</html>
