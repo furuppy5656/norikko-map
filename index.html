@@ -349,9 +349,10 @@ $('importFile').onchange=e=>{
   const r=new FileReader();
   r.onload=()=>{ try{
     const arr=JSON.parse(r.result); if(!Array.isArray(arr))throw new Error('形式が不正');
-    ridden=new Set(arr.map(String)); save(); updateTot();
+    const before=ridden.size; arr.map(String).forEach(k=>ridden.add(k));  // 追加（マージ）方式：既存記録を消さない
+    save(); updateTot();
     if(curPref)renderLineList(); if(curLine)renderDiagram(); if(mapInited)drawMap();
-    alert('読み込みました（'+ridden.size+'区間）');
+    alert('読み込み完了（+'+(ridden.size-before)+'区間 / 合計'+ridden.size+'区間）');
   }catch(err){ alert('読み込み失敗: '+err.message); } e.target.value=''; };
   r.readAsText(f);
 };
