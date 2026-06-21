@@ -120,7 +120,8 @@ const CLOSED={
   11118:{mode:'all',  note:'旅客廃止 2016（北海道新幹線へ移行）'},
   11111:{mode:'after',at:'鵡川',         note:'鵡川〜様似 廃止 2021'},
   11106:{mode:'between',from:'富良野',to:'新得', note:'富良野〜新得 廃止 2024'},
-  11113:{mode:'all',  note:'深川〜留萌 全線廃止 2026'}
+  11113:{mode:'all',  note:'深川〜留萌 全線廃止 2026'},
+  11415:{mode:'after',at:'敦賀', note:'敦賀〜金沢は2024に三セク転換（ハピラインふくい / IRいしかわ鉄道）'}
 };
 // 新規開業（ekidata未収録）。line_cdは9万台で衝突回避。
 const EXTRA_LINES=[
@@ -157,8 +158,12 @@ const EXTRA_LINES=[
   {line_cd:910008,pref:0,jr:true,line_name:"九州新幹線",stations:[{name:"博多",lat:33.59004,lon:130.42036},{name:"新鳥栖",lat:33.36979,lon:130.49142},{name:"久留米",lat:33.32064,lon:130.5014},{name:"筑後船小屋",lat:33.17822,lon:130.49161},{name:"新大牟田",lat:33.0712,lon:130.48876},{name:"新玉名",lat:32.94239,lon:130.57378},{name:"熊本",lat:32.79032,lon:130.68897},{name:"新八代",lat:32.51804,lon:130.63484},{name:"新水俣",lat:32.21058,lon:130.42867},{name:"出水",lat:32.08973,lon:130.35778},{name:"川内",lat:39.64071,lon:141.59776},{name:"鹿児島中央",lat:31.58371,lon:130.54179}]},
   {line_cd:910009,pref:0,jr:true,line_name:"西九州新幹線",stations:[{name:"武雄温泉",lat:33.19648,lon:130.02307},{name:"嬉野温泉",lat:33.10667,lon:129.99894},{name:"新大村",lat:32.93298,lon:129.95705},{name:"諫早",lat:32.85153,lon:130.04165},{name:"長崎",lat:32.75217,lon:129.86888}]},
   {line_cd:910010,pref:0,jr:true,line_name:"北海道新幹線",stations:[{name:"新青森",lat:40.82826,lon:140.69347},{name:"奥津軽いまべつ",lat:41.14502,lon:140.51568},{name:"木古内",lat:41.67856,lon:140.43425},{name:"新函館北斗",lat:41.90468,lon:140.64854}]},
+{line_cd:920001,pref:18,jr:false,line_name:"ハピラインふくい",stations:[{name:"敦賀",lat:35.64477,lon:136.07649},{name:"南今庄",lat:35.75742,lon:136.18472},{name:"今庄",lat:35.77295,lon:136.19928},{name:"湯尾",lat:35.80325,lon:136.19301},{name:"南条",lat:35.83196,lon:136.19339},{name:"王子保",lat:35.86626,lon:136.16559},{name:"武生",lat:35.90325,lon:136.17091},{name:"鯖江",lat:35.94335,lon:136.18885},{name:"北鯖江",lat:35.9715,lon:136.19845},{name:"大土呂",lat:36.01055,lon:136.21652},{name:"越前花堂",lat:36.03877,lon:136.21807},{name:"福井",lat:36.06206,lon:136.22352},{name:"森田",lat:36.10938,lon:136.22252},{name:"春江",lat:36.129,lon:136.22849},{name:"丸岡",lat:36.1626,lon:136.2335},{name:"芦原温泉",lat:36.21454,lon:136.23507},{name:"細呂木",lat:36.24125,lon:136.25697},{name:"牛ノ谷",lat:36.25941,lon:136.28162},{name:"大聖寺",lat:36.30031,lon:136.3142}]},
 ];
 const EXTRA_BY_CD={}; EXTRA_LINES.forEach(e=>EXTRA_BY_CD[e.line_cd]=e);
+const EXTEND={
+99426:{prepend:[{name:"大聖寺",lat:36.30031,lon:136.3142},{name:"加賀温泉",lat:36.32056,lon:136.35034},{name:"動橋",lat:36.32843,lon:136.38303},{name:"粟津",lat:36.35575,lon:136.42454},{name:"小松",lat:36.40255,lon:136.45293},{name:"明峰",lat:36.4253,lon:136.46311},{name:"能美根上",lat:36.45205,lon:136.45972},{name:"小舞子",lat:36.47637,lon:136.47493},{name:"美川",lat:36.486,lon:136.4892},{name:"加賀笠間",lat:36.50294,lon:136.52743},{name:"松任",lat:36.52671,lon:136.5662},{name:"野々市",lat:36.54164,lon:136.59804},{name:"西金沢",lat:36.55321,lon:136.62123}]}
+};
 function closedSet(cd,stations){
   const c=CLOSED[cd], s=new Set(); if(!c)return s; const n=stations.length-1;
   const idx=nm=>stations.findIndex(x=>x.name===nm);
@@ -181,7 +186,9 @@ async function loadLine(cd){
   const ex=EXTRA_BY_CD[cd];
   if(ex)return lineCache[cd]={name:ex.line_name,jr:!!ex.jr,stations:ex.stations,closed:new Set()};
   const d=await getJSON(`${API}/l/${cd}.json`);
-  const st=(d.station_l||[]).map(s=>({name:s.station_name,cd:s.station_cd,lon:+s.lon,lat:+s.lat}));
+  let st=(d.station_l||[]).map(s=>({name:s.station_name,cd:s.station_cd,lon:+s.lon,lat:+s.lat}));
+  if(EXTEND[cd]&&EXTEND[cd].prepend) st=[...EXTEND[cd].prepend, ...st];   // 既存線への延伸補正
+  if(EXTEND[cd]&&EXTEND[cd].append)  st=[...st, ...EXTEND[cd].append];
   return lineCache[cd]={name:d.line_name,jr:/^JR/.test(d.line_name),stations:st,closed:closedSet(cd,st)};
 }
 // 進捗は「現役区間（廃止を除く）」で計算
