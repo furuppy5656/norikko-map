@@ -196,7 +196,7 @@ async function loadLine(cd){
   if(EXTEND[cd]&&EXTEND[cd].prepend) st=[...EXTEND[cd].prepend, ...st];   // 既存線への延伸補正
   if(EXTEND[cd]&&EXTEND[cd].append)  st=[...st, ...EXTEND[cd].append];
   migrateLine(cd,st);
-  return lineCache[cd]={name:d.line_name,jr:/^JR/.test(d.line_name),stations:st,closed:closedSet(cd,st)};
+  return lineCache[cd]={name:d.line_name,jr:(+cd>=11000&&+cd<12000),stations:st,closed:closedSet(cd,st)};
 }
 // 進捗は「現役区間（廃止を除く）」で計算
 const sid=(cd,st,i)=>cd+'|'+st[i].name+'|'+st[i+1].name;   // 区間キー＝路線cd+隣接2駅名（駅名ベース・順序変更に強い）
@@ -239,7 +239,7 @@ function renderLineList(){
   const box=$('lineList'); box.innerHTML='';
   for(const l of prefLines[curPref]){
     const cd=l.line_cd, loaded=!!lineCache[cd], t=total(cd), d=done(cd), pct=t?Math.round(d/t*100):0;
-    const jr=EXTRA_BY_CD[cd]?!!EXTRA_BY_CD[cd].jr:/^JR/.test(l.line_name);
+    const jr=EXTRA_BY_CD[cd]?!!EXTRA_BY_CD[cd].jr:(+cd>=11000&&+cd<12000);
     const allClosed=CLOSED[cd]&&CLOSED[cd].mode==='all';
     const row=document.createElement('div');
     row.className='lineRow'+(cd===curLine?' sel':'');
