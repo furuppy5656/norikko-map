@@ -102,6 +102,7 @@
 
 <div id="viewMap">
   <div class="legend">
+    <button class="btn" id="mapAll" style="width:100%;margin-bottom:6px">🗾 全国の乗車済みを表示</button>
     <div style="font-weight:500;margin-bottom:2px">乗車済み区間のみ表示</div>
     <div><i style="border-color:var(--green)"></i>JR（実線）</div>
     <div><i style="border-color:var(--green);border-top-style:dashed"></i>私鉄（破線）</div>
@@ -298,14 +299,16 @@ function toggleSec(i){const l=lineCache[curLine], id=sid(curLine,l.stations,i); 
 function commit(){save(); renderDiagram(); renderLineList(); updateTot(); if(mapInited)drawMap()}
 
 /* ---- 地図 ---- */
-let map=null, mapInited=false, mgroup=null;
+let map=null, mapInited=false, mgroup=null, mapMode='pref';
 function initMap(){
   map=L.map('map',{minZoom:4,maxZoom:18}).setView([36.2,138.2],5);
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'&copy; OpenStreetMap'}).addTo(map);
   mgroup=L.layerGroup().addTo(map); mapInited=true;
 }
 function drawMap(){
-  if(!mapInited)return; mgroup.clearLayers();
+  if(!mapInited)return;
+  if(mapMode==='all'){ drawNationwide(); return; }
+  mgroup.clearLayers();
   const lines=(prefLines[curPref]||[]); const pts=[];
   for(const l of lines){
     const lc=lineCache[l.line_cd]; if(!lc)continue;
@@ -322,6 +325,26 @@ function drawMap(){
     }
   }
   if(pts.length)map.fitBounds(pts,{padding:[30,30]});
+}
+
+// 全国の乗車済みを描画（rideen から路線を全部ロードして緑だけ描く）
+async function drawNationwide(){
+  const cds=[...new Set([...ridden].map(k=>k.split('|')[0]))];
+  $('mapAll').textContent='全国を集計中…（初回は時間がかかります）';
+  await Promise.all(cds.map(cd=>loadLine(cd).catch(()=>null)));
+  mgroup.clearLayers(); const pts=[];
+  for(const cd of cds){
+    const lc=lineCache[cd]; if(!lc)continue;
+    for(let i=0;i<lc.stations.length-1;i++){
+      if(!ridden.has(sid(cd,lc.stations,i)))continue;
+      const a=lc.stations[i],b=lc.stations[i+1]; if(!a.lat||!b.lat)continue;
+      const pl=L.polyline([[a.lat,a.lon],[b.lat,b.lon]],{color:'#2e7d32',weight:5,opacity:1,dashArray:lc.jr?null:'10 6',lineCap:'butt'});
+      pl.bindTooltip(`${lc.name}：${a.name}—${b.name}`,{sticky:true});
+      pl.addTo(mgroup); pts.push([a.lat,a.lon],[b.lat,b.lon]);
+    }
+  }
+  $('mapAll').textContent = mapMode==='all'?'← 県別に戻る':'🗾 全国の乗車済みを表示';
+  if(pts.length)map.fitBounds(pts,{padding:[20,20]}); else map.setView([37.5,138],5);
 }
 
 /* ---- UI ---- */
@@ -360,6 +383,11 @@ $('importFile').onchange=e=>{
   r.readAsText(f);
 };
 
+$('mapAll').onclick=()=>{
+  mapMode = mapMode==='all'?'pref':'all';
+  if(mapMode==='pref') $('mapAll').textContent='🗾 全国の乗車済みを表示';
+  drawMap();
+};
 updateTot();
 </script>
 </body>
