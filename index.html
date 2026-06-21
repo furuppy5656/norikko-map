@@ -135,6 +135,18 @@ const EXTRA_LINES=[
     {name:'ゆいの杜東',lat:36.5676,lon:139.9983},{name:'芳賀台',lat:36.5663,lon:140.0054},
     {name:'工業団地管理センター前',lat:36.5650,lon:140.0107},{name:'かしの森公園前',lat:36.5724,lon:140.0146},
     {name:'芳賀・高根沢工業団地',lat:36.5784,lon:140.0120}
+  ]},
+  {line_cd:910001,pref:0,jr:true,line_name:'北陸新幹線',stations:[
+    {name:'高崎',lat:36.3229,lon:139.0125},{name:'安中榛名',lat:36.3349,lon:138.8389},
+    {name:'軽井沢',lat:36.3428,lon:138.6356},{name:'佐久平',lat:36.2840,lon:138.4760},
+    {name:'上田',lat:36.3897,lon:138.2492},{name:'長野',lat:36.6431,lon:138.1888},
+    {name:'飯山',lat:36.8516,lon:138.3664},{name:'上越妙高',lat:37.1186,lon:138.2560},
+    {name:'糸魚川',lat:37.0386,lon:137.8629},{name:'黒部宇奈月温泉',lat:36.8910,lon:137.5460},
+    {name:'富山',lat:36.7012,lon:137.2135},{name:'新高岡',lat:36.7390,lon:137.0080},
+    {name:'金沢',lat:36.5780,lon:136.6480},{name:'小松',lat:36.3990,lon:136.4530},
+    {name:'加賀温泉',lat:36.3030,lon:136.3260},{name:'芦原温泉',lat:36.2110,lon:136.2290},
+    {name:'福井',lat:36.0626,lon:136.2230},{name:'越前たけふ',lat:35.9080,lon:136.1840},
+    {name:'敦賀',lat:35.6450,lon:136.0780}
   ]}
 ];
 const EXTRA_BY_CD={}; EXTRA_LINES.forEach(e=>EXTRA_BY_CD[e.line_cd]=e);
@@ -158,7 +170,7 @@ async function getJSON(u){const r=await fetch(u);if(!r.ok)throw new Error('HTTP 
 async function loadLine(cd){
   if(lineCache[cd])return lineCache[cd];
   const ex=EXTRA_BY_CD[cd];
-  if(ex)return lineCache[cd]={name:ex.line_name,jr:false,stations:ex.stations,closed:new Set()};
+  if(ex)return lineCache[cd]={name:ex.line_name,jr:!!ex.jr,stations:ex.stations,closed:new Set()};
   const d=await getJSON(`${API}/l/${cd}.json`);
   const st=(d.station_l||[]).map(s=>({name:s.station_name,cd:s.station_cd,lon:+s.lon,lat:+s.lat}));
   return lineCache[cd]={name:d.line_name,jr:/^JR/.test(d.line_name),stations:st,closed:closedSet(cd,st)};
@@ -184,8 +196,9 @@ async function selectPref(p){
   const box=$('lineList'); box.innerHTML='<div class="hint">路線を読み込み中…</div>';
   try{
     if(!prefLines[p]){
-      prefLines[p]=((await getJSON(`${API}/p/${p}.json`)).line)||[];
-      EXTRA_LINES.filter(e=>e.pref===p).forEach(e=>{ if(!prefLines[p].some(x=>x.line_cd===e.line_cd)) prefLines[p].push({line_cd:e.line_cd,line_name:e.line_name}); });
+      let base = p>0 ? (((await getJSON(`${API}/p/${p}.json`)).line)||[]) : [];   // 0=新幹線カテゴリ（ekidata無し）
+      EXTRA_LINES.filter(e=>e.pref===p).forEach(e=>{ if(!base.some(x=>x.line_cd===e.line_cd)) base.push({line_cd:e.line_cd,line_name:e.line_name}); });
+      prefLines[p]=base;
     }
   }catch(e){
     box.innerHTML='<div style="color:#c00;font-size:13px">路線の取得に失敗（'+e.message+'）。「🔄 再読込」を押してください。</div>'; return;
@@ -197,11 +210,11 @@ async function selectPref(p){
 
 function renderLineList(){
   const pr=prefProgress(curPref);
-  $('prefHead').innerHTML=`<b>${PREFS[curPref]}</b>：${pr.pct}% <span style="color:#888">(${pr.d}/${pr.t}区間)</span>`;
+  $('prefHead').innerHTML=`<b>${curPref==0?'🚄 新幹線':PREFS[curPref]}</b>：${pr.pct}% <span style="color:#888">(${pr.d}/${pr.t}区間)</span>`;
   const box=$('lineList'); box.innerHTML='';
   for(const l of prefLines[curPref]){
     const cd=l.line_cd, loaded=!!lineCache[cd], t=total(cd), d=done(cd), pct=t?Math.round(d/t*100):0;
-    const jr=/^JR/.test(l.line_name);
+    const jr=EXTRA_BY_CD[cd]?!!EXTRA_BY_CD[cd].jr:/^JR/.test(l.line_name);
     const allClosed=CLOSED[cd]&&CLOSED[cd].mode==='all';
     const row=document.createElement('div');
     row.className='lineRow'+(cd===curLine?' sel':'');
@@ -290,9 +303,9 @@ function drawMap(){
 }
 
 /* ---- UI ---- */
-const sel=$('pref'); sel.innerHTML='<option value="">▼ 都道府県を選択</option>'+Object.entries(PREFS).map(([k,v])=>`<option value="${k}">${v}</option>`).join('');
+const sel=$('pref'); sel.innerHTML='<option value="">▼ 選択</option><option value="0">🚄 新幹線</option>'+Object.entries(PREFS).map(([k,v])=>`<option value="${k}">${v}</option>`).join('');
 sel.onchange=()=>{if(sel.value){curLine=null;$('diagram').innerHTML='<div class="hint">路線をクリックしてください。</div>';selectPref(+sel.value)}};
-$('refresh').onclick=()=>{ if(!curPref){alert('先に都道府県を選んでください');return} delete prefLines[curPref]; $('diagram').innerHTML='<div class="hint">路線をクリックしてください。</div>'; curLine=null; selectPref(curPref); };
+$('refresh').onclick=()=>{ if(curPref==null){alert('先に選択してください');return} delete prefLines[curPref]; $('diagram').innerHTML='<div class="hint">路線をクリックしてください。</div>'; curLine=null; selectPref(curPref); };
 
 document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>{
   document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
